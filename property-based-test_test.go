@@ -98,6 +98,7 @@ func TestConvertingToArabic(t *testing.T) {
 	}
 }
 
+// tests are mainly about random data but they would be mistaken
 func TestPropertiesOfConversion(t *testing.T) {
 	assertion := func(arabic uint16) bool {
 		if arabic > 3999 {
@@ -111,6 +112,7 @@ func TestPropertiesOfConversion(t *testing.T) {
 
 	quickConfig := &quick.Config{MaxCount:10}
 
+	// quick.Check a function that it will run against a number of random inputs, if the function returns false it will be seen as failing the check.
 	if err := quick.Check(assertion, quickConfig); err != nil {
 		t.Error("failed checks", err)
 	}

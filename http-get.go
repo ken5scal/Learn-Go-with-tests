@@ -5,7 +5,12 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"sort"
 )
+
+const dbFileName = "game.db.json"
+
 
 func main() {
 	//server := &PlayServer{
@@ -13,7 +18,16 @@ func main() {
 	//	router: http.NewServeMux(),
 	//}
 
-	server := NewPlayerServer(NewInMemoryPlayerStore())
+	db, err := os.OpenFile(dbFileName, os.O_RDWR|os.O_CREATE, 0666)
+	if err != nil {
+		log.Fatalf("problem opening %s %v", dbFileName, err)
+	}
+
+	store, err := NewFileSystemPlayerStore(db)
+	if err != nil {
+		log.Fatalf("problem creating file system player store, %v ", err)
+	}
+	server := NewPlayerServer(store)
 
 	if err := http.ListenAndServe(":5000", server); err != nil {
 		log.Fatalf("could not listen on port 5000 %v", err)
@@ -21,9 +35,9 @@ func main() {
 }
 
 type PlayStore interface {
-	GetPlayerScore(name string) int
+	GetPlayScore(name string) int
 	RecordWin(name string)
-	GetLeague() []Player
+	GetLeague() League
 }
 
 type PlayServer struct {
@@ -46,7 +60,7 @@ func NewPlayerServer(store PlayStore) *PlayServer {
 }
 
 func (p *PlayServer) showScore(w http.ResponseWriter, player string) {
-	score := p.store.GetPlayerScore(player)
+	score := p.store.GetPlayScore(player)
 
 	if score == 0 {
 		w.WriteHeader(http.StatusNotFound)
@@ -82,6 +96,74 @@ func (p *PlayServer) playersHandler(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		p.showScore(w, player)
 	}
+}
+
+type FileSystemPlayerStore struct {
+	database *json.Encoder
+	league League
+}
+
+func NewFileSystemPlayerStore(file *os.File) (*FileSystemPlayerStore, error) {
+	if err := initialisePlayerDBFile(file); err != nil {
+		return nil, fmt.Errorf("problem initialising player db file, %v", err)
+	}
+
+	league, err := NewLeague(file)
+
+	if err != nil {
+		return nil, fmt.Errorf("problem loading player store from file %s, %v", file.Name(), err)
+	}
+
+	return &FileSystemPlayerStore{
+		database: json.NewEncoder(&tape{file: file}),
+		league:league,
+	}, nil
+}
+
+func initialisePlayerDBFile(file *os.File) error {
+	file.Seek(0, 0)
+
+	info, err := file.Stat()
+
+	if err != nil {
+		return fmt.Errorf("problem getting file info from file %s, %v", file.Name(), err)
+	}
+
+	if info.Size()==0 {
+		file.Write([]byte("[]"))
+		file.Seek(0, 0)
+	}
+
+	return nil
+}
+
+func (f *FileSystemPlayerStore) GetLeague() League {
+	sort.Slice(f.league, func(i, j int) bool {
+		return f.league[i].Wins > f.league[j].Wins
+	})
+	return f.league
+}
+
+func (f *FileSystemPlayerStore) GetPlayScore(name string) int {
+	player := f.league.Find(name)
+
+	if player != nil {
+		return player.Wins
+	}
+
+	return 0
+}
+
+func (f *FileSystemPlayerStore) RecordWin(name string) {
+	player := f.league.Find(name)
+
+	if player != nil {
+		player.Wins++
+	} else {
+		f.league = append(f.league, Player{name, 1})
+	}
+
+	f.database.Encode(f.league)
 }
 
 type InMemoryPlayerStore struct {
